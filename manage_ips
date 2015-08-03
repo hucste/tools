@@ -1,0 +1,76 @@
+#!/bin/bash
+#set -x
+
+action="DROP"  # action iptables ; par défaut : DROP
+chain="INPUT"    # chain iptables ; par défaut : INPUT
+interface="eth0"
+
+days=7  # nb de jours à calculer
+
+dirname="$(dirname $0)"
+file="${dirname}/block_ips"
+hoy="$(date +"%Y-%m-%d")"
+seconds="$(bc <<< "${days} * 24 * 60 * 60")" # nb de secondes == x jours
+
+function block() {
+
+    local ip="$1"
+
+    if [[ ! -f "${file}" ]]; then touch "${file}"; fi
+
+    if [[ -f "${file}" ]]; then
+
+        echo "${ip}|${hoy}" >> "${file}"
+
+    fi
+
+    iptables -A "${chain}" -i "${interface}" -s "${ip}" -j "${action}"
+
+    }
+
+function release() {
+
+    if [[ -f "${file}" ]]; then
+        readarray -t infos < "${file}"
+
+        for info in "${infos[@]}"; do
+            ip="$(awk -F '|' '{print $1}' <<< "${info}")"
+            date="$(awk -F '|' '{print $2}' <<< "${info}")"
+
+            if [[ "${date}" != "no" ]]; then
+                date_seconds="$(date -d ${date} +%s)"
+                hoy="$(date -d ${hoy} +%s)"
+
+                let nb="$(bc <<< "${hoy} - ${date_seconds}")"
+                if [[ ${nb} -gt ${seconds} ]]; then
+                    echo "${ip}"
+
+                    # recherche de la ligne correspondante à l'ip à détruire
+                    let line=$(iptables -L ${chain} -n --line-numbers | awk '/"${ip}"/ {print $1}'); echo "$line"
+                    iptables -D "${chain}" ${line}
+
+                    # suppression de la ligne dans le fichier
+                    sed -i -e "s#${ip}|${date}##g" "${file}"
+                    unset line
+                fi
+            fi
+
+            unset date ip
+        done
+
+        # suppression des lignes vides
+        sed -i '/^$/d' "${file}"
+
+    fi
+
+    }
+
+case "$1" in
+    -b|block)   block "$2" ;;
+    -r|release) release ;;
+    *)
+        clear
+        echo "Usage: ${0##*/} {block|release}" >&2
+        exit 1
+    ;;
+esac
