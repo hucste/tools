@@ -1,32 +1,135 @@
 #!/bin/bash
 #set -x
 
+###
+#
+# Author: Stéphane HUC
+# mail: devs@stephane-huc.net
+#
+# License: BSD Simplified
+#
+# Github: https://github.com/hucste/tools
+#
+###
+
+###
+#
+# Edit your crontab:
+# 1 0 * * * /folder/manage_ips release
+# 59 23 * * * /folder/manage_ips block
+#
+# or, launch-it, manually! ;-)
+#
+###
+
 action="DROP"  # action iptables ; par défaut : DROP
 chain="INPUT"    # chain iptables ; par défaut : INPUT
 interface="eth0"
 
 days=7  # nb de jours à calculer
 
-dirname="$(dirname $0)"
+dirname="$(dirname "$0")"
 file="${dirname}/block_ips"
+
 hoy="$(date +"%Y-%m-%d")"
 seconds="$(bc <<< "${days} * 24 * 60 * 60")" # nb de secondes == x jours
 
-function block() {
+declare -a auth_ips=()
+auth_ips[0]="192.168.x.y" # valeur à changer !!!
+#auth_ips[1]=""
 
-    local ip="$1"
+declare -a errors=("400" "401" "405" "406" "409" "410" "411" "412" "413" "414" "415" "416" "417" "422" "424" "429" "431" "444" "456" "494" "495" "496" "497")
+errors=("${errors[@]}" "501" "504" "505" "506" "507" "508" "509" "510")
+
+declare -a ips
+
+declare -a logs=()
+logs[0]="/var/log/nginx/access.log"
+#logs[1]=""
+
+function block() {
 
     if [[ ! -f "${file}" ]]; then touch "${file}"; fi
 
-    if [[ -f "${file}" ]]; then
+    export LC_ALL=C
+    day_log="$(date +"%d/%b/%Y")"; echo "today: ${day_log}"
 
-        echo "${ip}|${hoy}" >> "${file}"
+    for log in "${logs[@]}"; do
+        echo "log: ${log}"
 
-    fi
+        log_today="$(grep "${day_log}" "${log}")"
+        if [[ $? -eq 0 ]]; then
+            for error in "${errors[@]}"; do
 
-    iptables -A "${chain}" -i "${interface}" -s "${ip}" -j "${action}"
+                if awk '/ "${error}" / {print $1}' <<< "${log_today}"; then
+
+                    grep " ${error} " <<< "${log_today}" | awk -F ' ' '{print $1}' > "/tmp/block_${error}_ips"
+
+                    let i=0
+                    while IFS=$'\n' read -r line; do
+
+                        if [[ $i -ge 1 ]]; then
+                            if ! in_array "${line}" "${ips[@]}" && ! in_array "${line}" "${auth_ips[@]}"; then
+                                ips[i]="${line}"
+                            fi
+                        else
+                            ips[i]="${line}"
+                        fi
+
+                        let i=i+1
+                    done < "/tmp/block_${error}_ips"
+
+                    if [[ ${#ips[@]} -ge 1 ]]; then
+                        for ip in "${ips[@]}"; do
+                            if [[ -n "${ip}" ]]; then
+                                echo -e "ip: ${ip} \n"
+                                search="$(awk '/${ip}/ {print}' "${file}")"
+
+                                if [[ -n "${search}" ]]; then
+                                    echo "ip à modifier: ${ip}"
+                                    sed -i -e "s#${ip}|\(.*\)#${ip}|${hoy}#g" "${file}"
+                                else
+                                    echo "ip à ajouter: ${ip}"
+                                    echo "${ip}|${hoy}" >> "${file}"
+
+                                    iptables -A "${chain}" -i "${interface}" -s "${ip}" -j "${action}"
+                                fi
+                            fi
+                        done
+                    fi
+
+                    unset ips
+
+                fi
+
+            done
+
+        fi
+
+        unset log_today
+
+    done
+
+    unset day_log
 
     }
+
+function in_array() {
+
+    # equivalent to PHP in_array
+    # call: in_array needle array
+
+    local i=0 needle="$1" IFS=" "; shift; read -a array <<< "$@"
+
+    while [ $i -le ${#array[@]} ]; do
+        if [[ "${array[$i]}" == "${needle}" ]]; then return 0; fi # true
+        let i=i+1
+    done
+    return 1
+
+    unset i needle IFS array
+
+}
 
 function release() {
 
@@ -38,15 +141,15 @@ function release() {
             date="$(awk -F '|' '{print $2}' <<< "${info}")"
 
             if [[ "${date}" != "no" ]]; then
-                date_seconds="$(date -d ${date} +%s)"
-                hoy="$(date -d ${hoy} +%s)"
+                date_seconds="$(date -d "${date}" +%s)"
+                hoy="$(date -d "${hoy}" +%s)"
 
                 let nb="$(bc <<< "${hoy} - ${date_seconds}")"
                 if [[ ${nb} -gt ${seconds} ]]; then
                     echo "${ip}"
 
                     # recherche de la ligne correspondante à l'ip à détruire
-                    let line=$(iptables -L ${chain} -n --line-numbers | awk '/"${ip}"/ {print $1}'); echo "$line"
+                    let line=$(iptables -L "${chain}" -n --line-numbers | awk '/"${ip}"/ {print $1}'); echo "$line"
                     iptables -D "${chain}" ${line}
 
                     # suppression de la ligne dans le fichier
@@ -66,7 +169,7 @@ function release() {
     }
 
 case "$1" in
-    -b|block)   block "$2" ;;
+    -b|block)   block ;;
     -r|release) release ;;
     *)
         clear
