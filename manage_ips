@@ -22,9 +22,10 @@
 #
 ###
 
-action="DROP"  # action iptables ; par défaut : DROP
-chain="INPUT"    # chain iptables ; par défaut : INPUT
+action="DROP"  # action $IPT ; par défaut : DROP
+chain="INPUT"    # chain $IPT ; par défaut : INPUT
 interface="eth0"
+IPT="$(which $IPT)"
 
 days=7  # nb de jours à calculer
 
@@ -38,7 +39,7 @@ declare -a auth_ips=()
 auth_ips[0]="192.168.x.y" # valeur à changer !!!
 #auth_ips[1]=""
 
-declare -a errors=("400" "401" "405" "406" "409" "410" "411" "412" "413" "414" "415" "416" "417" "422" "424" "429" "431" "444" "456" "494" "495" "496" "497")
+declare -a errors=("400" "401" "405" "406" "408" "409" "410" "411" "412" "413" "414" "415" "416" "417" "422" "424" "429" "431" "444" "456" "494" "495" "496" "497")
 errors=("${errors[@]}" "501" "504" "505" "506" "507" "508" "509" "510")
 
 declare -a ips
@@ -46,6 +47,7 @@ declare -a ips
 declare -a logs=()
 logs[0]="/var/log/nginx/access.log"
 #logs[1]=""
+#logs[2]=""
 
 function block() {
 
@@ -92,7 +94,7 @@ function block() {
                                     echo "ip à ajouter: ${ip}"
                                     echo "${ip}|${hoy}" >> "${file}"
 
-                                    iptables -A "${chain}" -i "${interface}" -s "${ip}" -j "${action}"
+                                    $IPT -A "${chain}" -i "${interface}" -s "${ip}" -j "${action}"
                                 fi
                             fi
                         done
@@ -149,8 +151,8 @@ function release() {
                     echo "${ip}"
 
                     # recherche de la ligne correspondante à l'ip à détruire
-                    let line=$(iptables -L "${chain}" -n --line-numbers | awk '/"${ip}"/ {print $1}'); echo "$line"
-                    iptables -D "${chain}" ${line}
+                    let line=$($IPT -L "${chain}" -n --line-numbers | awk '/"${ip}"/ {print $1}'); echo "$line"
+                    $IPT -D "${chain}" ${line}
 
                     # suppression de la ligne dans le fichier
                     sed -i -e "s#${ip}|${date}##g" "${file}"
