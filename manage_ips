@@ -1,6 +1,6 @@
 #!/bin/bash
 #set -x
-
+clear
 ###
 #
 # Author: Stéphane HUC
@@ -25,11 +25,10 @@
 action="DROP"  # action $IPT ; par défaut : DROP
 chain="INPUT"    # chain $IPT ; par défaut : INPUT
 interface="eth"
-IPT="$(which $IPT)"
+IPT="$(which iptables)"
 
 days=7  # nb de jours à calculer
 
-#dirname="$(dirname "$0")"
 dirname="$(dirname $(readlink -f -- "$0"))"
 file="${dirname}/block_ips"; echo "BlockIP file: ${file}"
 
@@ -87,8 +86,8 @@ function block() {
                     if [[ ${#ips[@]} -ge 1 ]]; then
                         for ip in "${ips[@]}"; do
                             if [[ -n "${ip}" ]]; then
-                                echo -e "ip: ${ip} \n"
-                                search="$(awk '/${ip}/ {print}' "${file}")"
+                                echo -e "ip: ${ip}"
+                                search="$(grep "${ip}" "${file}")"; echo "search: ${search}"
 
                                 if [[ -n "${search}" ]]; then
                                     echo "ip à modifier: ${ip}"
@@ -98,7 +97,7 @@ function block() {
                                     echo "${ip}|${hoy}" >> "${file}"
 
                                     #$IPT -A "${chain}" -i "${interface}" -s "${ip}" -j "${action}"
-                                    let line=$($IPT -L "${chain}" -n --line-numbers | awk '/"${chain}"/ {print $1}' | tail -n 1); echo "$line"
+                                    line="$($IPT -L "${chain}" -n --line-numbers | awk '/"${chain}"/ {print $1}' | tail -n 1)"; echo "$line"
                                     line="$(bc <<< "${line} + 1")"
                                     $IPT -I "${chain}" ${line} -i "${link}" -s "${ip}" -d "${address}" -j "${action}"
                                 fi
